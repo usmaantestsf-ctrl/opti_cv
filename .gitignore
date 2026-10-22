@@ -1,0 +1,43 @@
+# Dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# Testing
+/coverage
+
+# Next.js build output
+/.next/
+/out/
+
+# Production
+/build
+/dist
+
+# Misc
+.DS_Store
+*.pem
+
+# Local env files - strictly never commit secrets
+.env
+.env*.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Local storage fallback
+/.local_storage
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Private fixtures & scratch
+tests/fixtures/*
+!tests/fixtures/.gitkeep
+!tests/fixtures/sample_cv.docx
+!tests/fixtures/create_fixture.ts
+worker.py
