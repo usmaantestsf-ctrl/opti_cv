@@ -90,7 +90,8 @@ export async function POST(request: NextRequest) {
       stats: applyResult.stats,
       warnings: applyResult.warnings,
     });
-  } catch {
+  } catch (err) {
+    console.error("[tailor] Tailor error:", err);
     return jsonError("INTERNAL");
   }
 }

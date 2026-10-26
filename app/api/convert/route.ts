@@ -39,7 +39,8 @@ export async function POST(request: NextRequest) {
     await putUserFile(`cv/${userId}/latest.pdf`, result.pdfBuffer, "application/pdf");
 
     return NextResponse.json({ ok: true });
-  } catch {
+  } catch (err) {
+    console.error("[convert] Convert error:", err);
     return jsonError("INTERNAL");
   }
 }

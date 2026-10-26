@@ -89,7 +89,8 @@ export async function POST(request: NextRequest) {
       uploadedAt: meta.uploadedAt,
       editableParagraphs: editableCount,
     });
-  } catch {
+  } catch (err) {
+    console.error("[cv] Upload error:", err);
     return jsonError("INTERNAL");
   }
 }
