@@ -13,35 +13,46 @@ export async function POST(request: NextRequest) {
     // 1. Authenticate user from session
     const cookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
     if (!cookie) {
+      console.warn("[api/cv] Upload rejected: Missing session cookie");
       return jsonError("UNAUTHORIZED");
     }
 
     const session = await verifySession(cookie);
     if (!session) {
+      console.warn("[api/cv] Upload rejected: Invalid session");
       return jsonError("UNAUTHORIZED");
     }
 
     const userId = session.uid;
+    console.log(`[api/cv] Upload initiated by uid="${userId}" (name="${session.name}")`);
 
     // 2. Parse multipart form data
-    const formData = await request.formData().catch(() => null);
+    const formData = await request.formData().catch((err) => {
+      console.error("[api/cv] Failed to parse formData:", err?.message || err);
+      return null;
+    });
     if (!formData) {
       return jsonError("BAD_FILE");
     }
 
     const file = formData.get("file") as File | null;
     if (!file || !(file instanceof File)) {
+      console.warn("[api/cv] No valid file provided in formData");
       return jsonError("BAD_FILE");
     }
 
+    console.log(`[api/cv] Received file: name="${file.name}", size=${file.size} bytes, type="${file.type}"`);
+
     // 3. Validate file size (max 3 MB)
     if (file.size === 0 || file.size > MAX_FILE_SIZE) {
+      console.warn(`[api/cv] File size rejected: ${file.size} bytes (max ${MAX_FILE_SIZE})`);
       return jsonError("BAD_FILE");
     }
 
     // 4. Validate extension
     const filename = file.name || "cv.docx";
     if (!filename.toLowerCase().endsWith(".docx")) {
+      console.warn(`[api/cv] Non-DOCX extension rejected: "${filename}"`);
       return jsonError("BAD_FILE");
     }
 
@@ -52,7 +63,9 @@ export async function POST(request: NextRequest) {
     let paragraphs;
     try {
       paragraphs = parseDocx(buffer);
-    } catch {
+      console.log(`[api/cv] Parsed DOCX: total=${paragraphs.length} paragraphs`);
+    } catch (err: any) {
+      console.error("[api/cv] parseDocx failed:", err?.message || err);
       return jsonError("BAD_FILE");
     }
 
@@ -61,11 +74,15 @@ export async function POST(request: NextRequest) {
       (p) => !p.locked && p.text.trim().length > 0
     ).length;
 
+    console.log(`[api/cv] Editable paragraphs count: ${editableCount} of ${paragraphs.length}`);
+
     if (editableCount === 0) {
+      console.warn("[api/cv] Rejected: No editable paragraphs found in document");
       return jsonError("EMPTY_DOC");
     }
 
     // 7. Save master.docx with overwrite
+    console.log(`[api/cv] Saving master.docx for uid="${userId}"...`);
     await putUserFile(
       `cv/${userId}/master.docx`,
       buffer,
@@ -83,14 +100,16 @@ export async function POST(request: NextRequest) {
     };
     await setUserMeta(userId, meta);
 
+    console.log(`[api/cv] ✓ Upload complete for uid="${userId}": filename="${filename}", editableParagraphs=${editableCount}`);
+
     return NextResponse.json({
       ok: true,
       filename,
       uploadedAt: meta.uploadedAt,
       editableParagraphs: editableCount,
     });
-  } catch (err) {
-    console.error("[cv] Upload error:", err);
+  } catch (err: any) {
+    console.error("[api/cv] Unexpected upload error:", err?.stack || err?.message || err);
     return jsonError("INTERNAL");
   }
 }

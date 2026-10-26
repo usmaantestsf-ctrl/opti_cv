@@ -42,32 +42,55 @@ async function attemptConversion(
   docxBuffer: Buffer
 ): Promise<Buffer | null> {
   const { publicKey, secretKey } = keySet;
+  const keyLabel = `...${publicKey.slice(-4)}`;
 
   // 1. Authenticate to get JWT token
+  console.log(`[iloveapi] Key ${keyLabel}: step 1/5 POST /v1/auth...`);
   const authRes = await fetch("https://api.ilovepdf.com/v1/auth", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ public_key: publicKey, secret_key: secretKey }),
-  }).catch(() => null);
+  }).catch((err) => {
+    console.warn(`[iloveapi] Key ${keyLabel}: step 1 auth network error:`, err?.message || err);
+    return null;
+  });
 
-  if (!authRes || !authRes.ok) return null;
+  if (!authRes || !authRes.ok) {
+    console.warn(`[iloveapi] Key ${keyLabel}: step 1 auth failed (status=${authRes?.status})`);
+    return null;
+  }
   const authData = await authRes.json().catch(() => null);
   const token = authData?.token;
-  if (!token || typeof token !== "string") return null;
+  if (!token || typeof token !== "string") {
+    console.warn(`[iloveapi] Key ${keyLabel}: step 1 auth token missing in response`);
+    return null;
+  }
 
   // 2. Start officepdf task
+  console.log(`[iloveapi] Key ${keyLabel}: step 2/5 GET /v1/start/officepdf...`);
   const startRes = await fetch("https://api.ilovepdf.com/v1/start/officepdf", {
     method: "GET",
     headers: { Authorization: `Bearer ${token}` },
-  }).catch(() => null);
+  }).catch((err) => {
+    console.warn(`[iloveapi] Key ${keyLabel}: step 2 start network error:`, err?.message || err);
+    return null;
+  });
 
-  if (!startRes || !startRes.ok) return null;
+  if (!startRes || !startRes.ok) {
+    console.warn(`[iloveapi] Key ${keyLabel}: step 2 start failed (status=${startRes?.status})`);
+    return null;
+  }
   const startData = await startRes.json().catch(() => null);
   const server = startData?.server;
   const task = startData?.task;
-  if (!server || !task) return null;
+  if (!server || !task) {
+    console.warn(`[iloveapi] Key ${keyLabel}: step 2 server/task missing in response`);
+    return null;
+  }
+  console.log(`[iloveapi] Key ${keyLabel}: step 2 task started: server=${server}, task=${task}`);
 
   // 3. Upload file (multipart/form-data)
+  console.log(`[iloveapi] Key ${keyLabel}: step 3/5 POST /v1/upload (${docxBuffer.length} bytes)...`);
   const formData = new FormData();
   formData.append("task", task);
   const blob = new Blob([new Uint8Array(docxBuffer)], {
@@ -79,14 +102,24 @@ async function attemptConversion(
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
     body: formData,
-  }).catch(() => null);
+  }).catch((err) => {
+    console.warn(`[iloveapi] Key ${keyLabel}: step 3 upload network error:`, err?.message || err);
+    return null;
+  });
 
-  if (!uploadRes || !uploadRes.ok) return null;
+  if (!uploadRes || !uploadRes.ok) {
+    console.warn(`[iloveapi] Key ${keyLabel}: step 3 upload failed (status=${uploadRes?.status})`);
+    return null;
+  }
   const uploadData = await uploadRes.json().catch(() => null);
   const serverFilename = uploadData?.server_filename;
-  if (!serverFilename) return null;
+  if (!serverFilename) {
+    console.warn(`[iloveapi] Key ${keyLabel}: step 3 server_filename missing in response`);
+    return null;
+  }
 
   // 4. Process officepdf task
+  console.log(`[iloveapi] Key ${keyLabel}: step 4/5 POST /v1/process...`);
   const processRes = await fetch(`https://${server}/v1/process`, {
     method: "POST",
     headers: {
@@ -103,21 +136,38 @@ async function attemptConversion(
         },
       ],
     }),
-  }).catch(() => null);
+  }).catch((err) => {
+    console.warn(`[iloveapi] Key ${keyLabel}: step 4 process network error:`, err?.message || err);
+    return null;
+  });
 
-  if (!processRes || !processRes.ok) return null;
+  if (!processRes || !processRes.ok) {
+    console.warn(`[iloveapi] Key ${keyLabel}: step 4 process failed (status=${processRes?.status})`);
+    return null;
+  }
 
   // 5. Download converted PDF
+  console.log(`[iloveapi] Key ${keyLabel}: step 5/5 GET /v1/download/${task}...`);
   const downloadRes = await fetch(`https://${server}/v1/download/${task}`, {
     method: "GET",
     headers: { Authorization: `Bearer ${token}` },
-  }).catch(() => null);
+  }).catch((err) => {
+    console.warn(`[iloveapi] Key ${keyLabel}: step 5 download network error:`, err?.message || err);
+    return null;
+  });
 
-  if (!downloadRes || !downloadRes.ok) return null;
+  if (!downloadRes || !downloadRes.ok) {
+    console.warn(`[iloveapi] Key ${keyLabel}: step 5 download failed (status=${downloadRes?.status})`);
+    return null;
+  }
 
   const arrayBuffer = await downloadRes.arrayBuffer().catch(() => null);
-  if (!arrayBuffer) return null;
+  if (!arrayBuffer) {
+    console.warn(`[iloveapi] Key ${keyLabel}: step 5 failed to read downloaded arrayBuffer`);
+    return null;
+  }
 
+  console.log(`[iloveapi] ✓ Key ${keyLabel}: conversion pipeline succeeded (${arrayBuffer.byteLength} bytes)`);
   return Buffer.from(arrayBuffer);
 }
 
@@ -126,8 +176,10 @@ async function attemptConversion(
  */
 export async function convertDocxToPdf(docxBuffer: Buffer): Promise<ConvertResult> {
   const keySets = getKeySets();
+  console.log(`[iloveapi] convertDocxToPdf called: ${keySets.length} key set(s) configured`);
 
   if (keySets.length === 0) {
+    console.warn("[iloveapi] No iLoveAPI keys found in environment variables");
     return {
       ok: false,
       code: "PDF_UNAVAILABLE",
@@ -135,24 +187,28 @@ export async function convertDocxToPdf(docxBuffer: Buffer): Promise<ConvertResul
     };
   }
 
-  for (const keySet of keySets) {
+  for (let keyIndex = 0; keyIndex < keySets.length; keyIndex++) {
+    const keySet = keySets[keyIndex];
     // Try attempt (with 1 retry on the same key set if needed)
     for (let attempt = 0; attempt < 2; attempt++) {
+      console.log(`[iloveapi] Attempting key set ${keyIndex + 1}/${keySets.length} (try ${attempt + 1}/2)...`);
       try {
         const result = await attemptConversion(keySet, docxBuffer);
         if (result && result.length > 0) {
+          console.log(`[iloveapi] ✓ Conversion successful with key set ${keyIndex + 1}`);
           return {
             ok: true,
             pdfBuffer: result,
           };
         }
-      } catch {
-        // Retry once on network failure
+      } catch (err: any) {
+        console.warn(`[iloveapi] Exception during attempt with key set ${keyIndex + 1}:`, err?.message || err);
       }
     }
   }
 
   // All key sets exhausted
+  console.error("[iloveapi] ✗ All iLoveAPI key sets exhausted without success");
   return {
     ok: false,
     code: "PDF_UNAVAILABLE",

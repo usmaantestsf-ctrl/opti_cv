@@ -30,6 +30,8 @@ export async function GET(request: NextRequest) {
   const hasPdf = await userFileExists(`cv/${userId}/latest.pdf`);
   const meta = await getUserMeta(userId);
 
+  console.log(`[api/me] Status for uid="${userId}" (${userName}): masterCv=${hasCv}, tailoredDocx=${hasTailored}, pdf=${hasPdf}`);
+
   return NextResponse.json({
     ok: true,
     uid: userId,

@@ -28,12 +28,14 @@ export async function middleware(request: NextRequest) {
       try {
         const originHost = new URL(origin).host;
         if (originHost !== host) {
+          console.warn(`[middleware] CSRF rejected: originHost="${originHost}" !== host="${host}" for ${pathname}`);
           return new NextResponse(
             JSON.stringify({ ok: false, code: "UNAUTHORIZED", message: "Invalid request origin." }),
             { status: 403, headers: { "content-type": "application/json" } }
           );
         }
       } catch {
+        console.warn(`[middleware] CSRF rejected: invalid origin URL "${origin}" for ${pathname}`);
         return new NextResponse(
           JSON.stringify({ ok: false, code: "UNAUTHORIZED", message: "Invalid request origin." }),
           { status: 403, headers: { "content-type": "application/json" } }
@@ -59,6 +61,7 @@ export async function middleware(request: NextRequest) {
   if (!session) {
     // API routes return 401 JSON
     if (pathname.startsWith("/api/")) {
+      console.warn(`[middleware] Unauthenticated API access blocked: ${request.method} ${pathname}`);
       return new NextResponse(
         JSON.stringify({ ok: false, code: "UNAUTHORIZED", message: "Please log in again." }),
         { status: 401, headers: { "content-type": "application/json" } }

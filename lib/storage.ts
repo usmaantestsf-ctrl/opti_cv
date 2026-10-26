@@ -29,35 +29,63 @@ export async function putUserFile(
   data: Buffer | string,
   contentType?: string
 ): Promise<{ url?: string }> {
+  const byteLength = typeof data === "string" ? Buffer.byteLength(data) : data.length;
+  const provider = isVercelBlobConfigured() ? "vercel-blob" : "local-fs";
+  console.log(`[storage] putUserFile: "${pathname}" (${byteLength} bytes, provider: ${provider})`);
+
   if (isVercelBlobConfigured()) {
-    const blob = await put(pathname, data, {
-      access: "public",
-      addRandomSuffix: false,
-      contentType,
-    });
-    return { url: blob.url };
+    try {
+      const blob = await put(pathname, data, {
+        access: "public",
+        addRandomSuffix: false,
+        contentType,
+      });
+      console.log(`[storage] ✓ putUserFile saved to blob: "${pathname}" (${blob.url})`);
+      return { url: blob.url };
+    } catch (err: any) {
+      console.error(`[storage] ✗ putUserFile error for "${pathname}":`, err?.message || err);
+      throw err;
+    }
   }
 
   // Local filesystem fallback
-  const localPath = getLocalFilePath(pathname);
-  await fs.promises.mkdir(path.dirname(localPath), { recursive: true });
-  await fs.promises.writeFile(localPath, data);
-  return { url: `local://${pathname}` };
+  try {
+    const localPath = getLocalFilePath(pathname);
+    await fs.promises.mkdir(path.dirname(localPath), { recursive: true });
+    await fs.promises.writeFile(localPath, data);
+    console.log(`[storage] ✓ putUserFile saved to local disk: "${pathname}"`);
+    return { url: `local://${pathname}` };
+  } catch (err: any) {
+    console.error(`[storage] ✗ putUserFile local fs error for "${pathname}":`, err?.message || err);
+    throw err;
+  }
 }
 
 /**
  * Get a user file as Buffer. Returns null if file not found.
  */
 export async function getUserFile(pathname: string): Promise<Buffer | null> {
+  const provider = isVercelBlobConfigured() ? "vercel-blob" : "local-fs";
+  console.log(`[storage] getUserFile: "${pathname}" (provider: ${provider})`);
+
   if (isVercelBlobConfigured()) {
     try {
       const blob = await head(pathname);
-      if (!blob || !blob.url) return null;
+      if (!blob || !blob.url) {
+        console.log(`[storage] getUserFile: head("${pathname}") returned no blob url (file not found)`);
+        return null;
+      }
       const res = await fetch(blob.url);
-      if (!res.ok) return null;
+      if (!res.ok) {
+        console.warn(`[storage] getUserFile: fetch blob url returned ${res.status} for "${pathname}"`);
+        return null;
+      }
       const arrayBuffer = await res.arrayBuffer();
-      return Buffer.from(arrayBuffer);
-    } catch {
+      const buffer = Buffer.from(arrayBuffer);
+      console.log(`[storage] ✓ getUserFile retrieved: "${pathname}" (${buffer.length} bytes)`);
+      return buffer;
+    } catch (err: any) {
+      console.log(`[storage] getUserFile: head("${pathname}") error/not found: ${err?.message || err}`);
       return null;
     }
   }
@@ -65,8 +93,11 @@ export async function getUserFile(pathname: string): Promise<Buffer | null> {
   // Local filesystem fallback
   const localPath = getLocalFilePath(pathname);
   try {
-    return await fs.promises.readFile(localPath);
+    const buf = await fs.promises.readFile(localPath);
+    console.log(`[storage] ✓ getUserFile retrieved from local disk: "${pathname}" (${buf.length} bytes)`);
+    return buf;
   } catch {
+    console.log(`[storage] getUserFile: local file not found "${pathname}"`);
     return null;
   }
 }
@@ -78,25 +109,30 @@ export async function userFileExists(pathname: string): Promise<boolean> {
   if (isVercelBlobConfigured()) {
     try {
       const blob = await head(pathname);
-      return Boolean(blob && blob.url);
+      const exists = Boolean(blob && blob.url);
+      console.log(`[storage] userFileExists: "${pathname}" -> ${exists}`);
+      return exists;
     } catch {
       return false;
     }
   }
 
   const localPath = getLocalFilePath(pathname);
-  return fs.existsSync(localPath);
+  const exists = fs.existsSync(localPath);
+  return exists;
 }
 
 /**
  * Delete a user file.
  */
 export async function deleteUserFile(pathname: string): Promise<void> {
+  console.log(`[storage] deleteUserFile: "${pathname}"`);
   if (isVercelBlobConfigured()) {
     try {
       await del(pathname);
-    } catch {
-      // Ignore not found
+      console.log(`[storage] ✓ deleteUserFile removed: "${pathname}"`);
+    } catch (err: any) {
+      console.log(`[storage] deleteUserFile (ignored error): ${err?.message || err}`);
     }
     return;
   }
@@ -104,6 +140,7 @@ export async function deleteUserFile(pathname: string): Promise<void> {
   const localPath = getLocalFilePath(pathname);
   try {
     await fs.promises.unlink(localPath);
+    console.log(`[storage] ✓ deleteUserFile removed from local disk: "${pathname}"`);
   } catch {
     // Ignore not found
   }
@@ -129,6 +166,7 @@ export async function getUserMeta(userId: string): Promise<UserMeta | null> {
  */
 export async function setUserMeta(userId: string, meta: UserMeta): Promise<void> {
   const metaPath = `cv/${userId}/meta.json`;
+  console.log(`[storage] setUserMeta: for uid="${userId}"`);
   await putUserFile(metaPath, JSON.stringify(meta, null, 2), "application/json");
 }
 

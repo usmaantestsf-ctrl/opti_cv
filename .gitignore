@@ -41,3 +41,4 @@ tests/fixtures/*
 !tests/fixtures/sample_cv.docx
 !tests/fixtures/create_fixture.ts
 worker.py
+gitkey.txt

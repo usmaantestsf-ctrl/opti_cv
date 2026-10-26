@@ -22,20 +22,24 @@ export async function POST(request: NextRequest) {
     // 1. Check rate limit: 5 fails per IP per 15 min returns 429
     const rateLimit = checkLoginRateLimit(ip);
     if (!rateLimit.allowed) {
+      console.warn(`[api/login] Rate limit exceeded for ip=${ip}`);
       return jsonError("TOO_MANY_ATTEMPTS");
     }
 
     const body = await request.json().catch(() => null);
     if (!body || typeof body.username !== "string" || typeof body.password !== "string") {
+      console.warn(`[api/login] Invalid request body from ip=${ip}`);
       await new Promise((r) => setTimeout(r, 800));
       recordFailedLoginAttempt(ip);
       return jsonError("BAD_LOGIN");
     }
 
     const { username, password } = body;
+    console.log(`[api/login] Attempt: username="${username.trim()}" from ip=${ip}`);
     const user = await authenticateUser(username.trim(), password);
 
     if (!user) {
+      console.warn(`[api/login] ✗ Invalid credentials for user="${username.trim()}" from ip=${ip}`);
       // Artificial delay ~800ms to mitigate timing/brute force attacks
       await new Promise((r) => setTimeout(r, 800));
       recordFailedLoginAttempt(ip);
@@ -50,6 +54,8 @@ export async function POST(request: NextRequest) {
       uid: user.uid,
       name: user.name,
     });
+
+    console.log(`[api/login] ✓ Login success: user="${user.name}" (uid=${user.uid}) from ip=${ip}`);
 
     const response = NextResponse.json({
       ok: true,
@@ -68,7 +74,8 @@ export async function POST(request: NextRequest) {
     });
 
     return response;
-  } catch {
+  } catch (err: any) {
+    console.error("[api/login] Unexpected login error:", err?.stack || err?.message || err);
     return jsonError("INTERNAL");
   }
 }
